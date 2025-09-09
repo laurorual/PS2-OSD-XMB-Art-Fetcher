@@ -30,7 +30,7 @@ For Most Users (Recommended) - Using Pre-built Binaries:
 
 # 📁 Expected Directory Structure
 
-    your_osdxmb_root/
+    your_storage_root/
     ├── OSDXMB/
     │   └── ART/ (artwork will be saved here)
     └── DVD/
