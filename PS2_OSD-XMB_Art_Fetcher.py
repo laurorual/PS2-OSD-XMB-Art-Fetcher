@@ -31,12 +31,22 @@ def save_config(config):
     with open(CONFIG_FILE, "w", encoding="utf-8") as f:
         json.dump(config, f, ensure_ascii=False, indent=4)
 
-# Load cache
+# Load cache with new structure
 def load_cache():
     if os.path.exists(CACHE_FILE):
-        with open(CACHE_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
-    return {}
+        try:
+            with open(CACHE_FILE, "r", encoding="utf-8") as f:
+                cache_data = json.load(f)
+                # Ensure the cache has the proper structure
+                if "scanned_files" not in cache_data:
+                    cache_data["scanned_files"] = {}
+                if "excluded_files" not in cache_data:
+                    cache_data["excluded_files"] = []
+                return cache_data
+        except json.JSONDecodeError:
+            # Return empty cache structure if file is corrupted
+            return {"scanned_files": {}, "excluded_files": []}
+    return {"scanned_files": {}, "excluded_files": []}
 
 # Save cache
 def save_cache(cache):
@@ -57,8 +67,7 @@ LANGUAGES = {
                          "Você pode obter sua API Key gratuitamente em https://www.steamgriddb.com/profile/preferences na seção 'API Key'."),
         "process_start": "Iniciando escaneamento...",
         "process_end": "Processo concluído. Verifique o arquivo log.txt para detalhes.",
-        "use_saved_config": "Deseja usar o diretório e API KEY salvos?\nDiretório salvo: {saved_root}\n1 - Sim\n2 - Não, usar novos\nEscolha: ",
-        "no_saved_config": "Nenhuma configuração salva encontrada.",
+        "use_saved_config": "Deseja usar o diretório e API KEY salvos?\nDiretório salvo: {saved_root}\n1 - Sim\n2 - Não, usar novos\nEscolha: ",        "no_saved_config": "Nenhuma configuração salva encontrada.",
         "config_saved": "Configuração salva para próxima execução.",
         "summary_title": "=== RESUMO DO PROCESSAMENTO ===",
         "successful_games": "Jogos com arte baixada com sucesso:",
@@ -66,7 +75,9 @@ LANGUAGES = {
         "press_any_key": "Pressione qualquer tecla para sair...",
         "total_processed": "Total de ISOs processados: {}",
         "success_count": "Artes baixadas com sucesso: {}",
-        "failed_count": "Artes não encontradas: {}"
+        "failed_count": "Artes não encontradas: {}",
+        "exclude_prompt": "\nDeseja adicionar os jogos sem arte à lista de exclusão?\n1 - Sim\n2 - Não\nEscolha: ",
+        "excluded_added": "Jogos adicionados à lista de exclusão."
     },
     "en": {
         "choose_lang": "Select language:\n1 - Portuguese\n2 - English\nChoice: ",
@@ -86,7 +97,9 @@ LANGUAGES = {
         "press_any_key": "Press any key to exit...",
         "total_processed": "Total ISOs processed: {}",
         "success_count": "Art successfully downloaded: {}",
-        "failed_count": "Art not found: {}"
+        "failed_count": "Art not found: {}",
+        "exclude_prompt": "\nDo you want to add games without art to the exclusion list?\n1 - Yes\n2 - No\nChoice: ",
+        "excluded_added": "Games added to exclusion list."
     }
 }
 
@@ -102,8 +115,8 @@ if choice.strip() == "2":
 elif choice.strip() == "1":
     lang = "pt"
 else:
-    print(LANGUAGES["pt"]["invalid_lang"])
-    lang = "pt"
+    print(LANGUAGES["en"]["invalid_lang"])
+    lang = "en"
 
 L = LANGUAGES[lang]
 
@@ -113,13 +126,8 @@ def log(message):
         f.write(message + "\n")
     print(message)
 
-# Function to fetch SteamGridDB images with caching
+# Function to fetch SteamGridDB images (without caching)
 def fetch_sgdb_image(game_name, category, api_key):
-    key = f"{game_name}_{category}"
-    if key in cache:
-        log(f"Cache hit for {game_name} [{category}] -> {cache[key]}")
-        return cache[key]
-    
     url = f"https://www.steamgriddb.com/api/v2/search/autocomplete/{game_name}"
     headers = {"Authorization": f"Bearer {api_key}"}
     r = requests.get(url, headers=headers)
@@ -144,8 +152,6 @@ def fetch_sgdb_image(game_name, category, api_key):
         log(f"[WARN] No {category} images found for {game_name}")
         return None
 
-    cache[key] = images[0]["url"]
-    save_cache(cache)
     log(f"Fetched {category} for {game_name}: {images[0]['url']}")
     return images[0]["url"]
 
@@ -253,19 +259,55 @@ if __name__ == "__main__":
     log("=== PS2 ISO Scan Started ===")
 
     dvd_path = root_path / "DVD"
-    iso_files = list(dvd_path.glob("*.iso"))
+    
+    # Get all ISO files and filter out excluded ones
+    iso_files = [iso_file for iso_file in dvd_path.glob("*.iso") 
+                if iso_file.name not in cache["excluded_files"]]
+    
     total_isos = len(iso_files)
     
     for iso_file in iso_files:
-        log(f"Processing ISO: {iso_file.name}")
+        filename = iso_file.name
+        
+        # Check if file is already in cache
+        if filename in cache["scanned_files"]:
+            cache_entry = cache["scanned_files"][filename]
+            
+            if cache_entry["status"] == "OK":
+                log(f"Skipping {filename} - already processed successfully")
+                successful_games.append(f"{cache_entry.get('game_name', 'Unknown')} (GameID: {cache_entry['gameid']})")
+                continue
+            elif cache_entry["status"] == "BAD":
+                log(f"Retrying {filename} - previous attempt failed")
+                # Continue with processing
+            else:
+                log(f"Unknown status for {filename} in cache, reprocessing")
+        
+        log(f"Processing ISO: {filename}")
         gameid = extract_gameid_from_iso(iso_file)
         if not gameid:
-            failed_games.append(f"{iso_file.name} (Failed to extract GameID)")
+            log(f"Failed to extract GameID from {filename}")
+            # Update cache with BAD status
+            cache["scanned_files"][filename] = {
+                "status": "BAD",
+                "gameid": "UNKNOWN",
+                "reason": "Failed to extract GameID"
+            }
+            save_cache(cache)
+            failed_games.append(f"{filename} (Failed to extract GameID)")
             continue
         
         name = lookup_game_name(gameid)
         if not name:
-            failed_games.append(f"{iso_file.name} (GameID: {gameid} - Not found in GameIndex)")
+            log(f"GameID {gameid} not found in GameIndex for {filename}")
+            # Update cache with BAD status
+            cache["scanned_files"][filename] = {
+                "status": "BAD",
+                "gameid": gameid,
+                "reason": "GameID not found in GameIndex"
+            }
+            save_cache(cache)
+            failed_games.append(f"{filename} (GameID: {gameid} - Not found in GameIndex)")
             continue
 
         art_path = root_path / "OSDXMB" / "ART" / gameid
@@ -297,12 +339,42 @@ if __name__ == "__main__":
                 log(f"[ERROR] Failed to save PIC1.png for {name}: {e}")
 
         if logo_success or hero_success:
+            # Update cache with OK status
+            cache["scanned_files"][filename] = {
+                "status": "OK",
+                "gameid": gameid,
+                "game_name": name
+            }
+            save_cache(cache)
             successful_games.append(f"{name} (GameID: {gameid})")
         else:
+            # Update cache with BAD status
+            cache["scanned_files"][filename] = {
+                "status": "BAD",
+                "gameid": gameid,
+                "game_name": name,
+                "reason": "No art found"
+            }
+            save_cache(cache)
             failed_games.append(f"{name} (GameID: {gameid} - No art found)")
 
     log("=== PS2 ISO Scan Finished ===")
     print(L["process_end"])
+    
+    # Ask user if they want to add failed games to exclusion list
+    if failed_games:
+        choice = input(L["exclude_prompt"])
+        if choice.strip() == "1":
+            for game_info in failed_games:
+                # Extract filename from the game info string
+                filename_match = re.search(r'^(.*?)\s*\(', game_info)
+                if filename_match:
+                    filename = filename_match.group(1).strip()
+                    if filename not in cache["excluded_files"]:
+                        cache["excluded_files"].append(filename)
+            
+            save_cache(cache)
+            print(L["excluded_added"])
     
     # Display summary
     clear_screen()
