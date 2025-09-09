@@ -19,7 +19,8 @@ For Most Users (Recommended) - Using Pre-built Binaries:
 
 1. Go to the Releases section of this repository
 2. Download the appropriate executable for your system
-3. Run the Executable:
+3. Go to SteamGridDB website, create an account and get your API KEYS (needed for this app to work atm)
+4. Run the Executable:
 
         Windows: Double-click PS2_OSD-XMB_Art_Fetcher_Win.exe or run from command prompt
 
