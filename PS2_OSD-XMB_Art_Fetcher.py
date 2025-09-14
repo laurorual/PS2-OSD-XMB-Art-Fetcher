@@ -5,12 +5,20 @@ import pycdlib
 import re
 import json
 import yaml
+import xml.etree.ElementTree as ET
+import warnings
+import zipfile
 from pathlib import Path
 from io import BytesIO
+from difflib import SequenceMatcher
+
+# Suppress the specific deprecation warning
+warnings.filterwarnings("ignore", category=DeprecationWarning, message="Testing an element's truth value")
 
 CACHE_FILE = "cache.json"
 LOG_FILE = "log.txt"
 CONFIG_FILE = "config.json"
+METADATA_URL = "https://gamesdb.launchbox-app.com/Metadata.zip"
 
 # Clear screen function
 def clear_screen():
@@ -53,6 +61,51 @@ def save_cache(cache):
     with open(CACHE_FILE, "w", encoding="utf-8") as f:
         json.dump(cache, f, ensure_ascii=False, indent=4)
 
+# Function to download and extract Metadata.xml
+def download_metadata():
+    if os.path.exists("Metadata.xml"):
+        log("Metadata.xml already exists, skipping download.")
+        return True
+    
+    log("Downloading Metadata.zip...")
+    try:
+        response = requests.get(METADATA_URL)
+        if response.status_code != 200:
+            log(f"[ERROR] Failed to download Metadata.zip (status {response.status_code})")
+            return False
+        
+        # Save the zip file
+        with open("Metadata.zip", "wb") as f:
+            f.write(response.content)
+        
+        # Extract only Metadata.xml from the zip
+        with zipfile.ZipFile("Metadata.zip", 'r') as zip_ref:
+            # Look for Metadata.xml in the zip file
+            for file_info in zip_ref.infolist():
+                if file_info.filename.endswith('Metadata.xml'):
+                    # Extract the file
+                    zip_ref.extract(file_info)
+                    log("Extracted Metadata.xml from zip.")
+                    break
+            else:
+                log("[ERROR] Metadata.xml not found in the downloaded zip file.")
+                return False
+        
+        # Clean up: delete the zip file
+        os.remove("Metadata.zip")
+        log("Deleted Metadata.zip after extraction.")
+        return True
+        
+    except Exception as e:
+        log(f"[ERROR] Failed to download or extract Metadata.zip: {e}")
+        # Clean up if possible
+        if os.path.exists("Metadata.zip"):
+            try:
+                os.remove("Metadata.zip")
+            except:
+                pass
+        return False
+
 cache = load_cache()
 config = load_config()
 
@@ -62,12 +115,14 @@ LANGUAGES = {
         "choose_lang": "Selecione o idioma / Select language:\n1 - Português\n2 - English\nEscolha: ",
         "invalid_lang": "Opção inválida, padrão Português selecionado.",
         "ask_root": "Digite o diretório raiz que contém as pastas 'OSDXMB' e 'DVD': ",
-        "missing_folders": "Erro: As pastas 'OSDXMB' e 'DVD' devem existir dentro do diretório fornecido.",
+        "missing_folders": "Erro: As pastas 'OSDXMB' y 'DVD' devem existir dentro do diretório fornecido.",
         "ask_api_key": ("Digite sua SteamGridDB API Key: ",
-                         "Você pode obter sua API Key gratuitamente em https://www.steamgriddb.com/profile/preferences na seção 'API Key'."),
+                         "Este aplicativo utiliza a API do SteamGridDB para obter as artes caso não consiga obter de outras formas. Você pode obter sua API Key gratuitamente em https://www.steamgriddb.com/profile/preferences na seção 'API Key'."),
+        "api_key_optional": "A API Key é OPCIONAL. Pressione Enter para pular ou digite sua API e pressione Enter: ",
         "process_start": "Iniciando escaneamento...",
         "process_end": "Processo concluído. Verifique o arquivo log.txt para detalhes.",
-        "use_saved_config": "Deseja usar o diretório e API KEY salvos?\nDiretório salvo: {saved_root}\n1 - Sim\n2 - Não, usar novos\nEscolha: ",        "no_saved_config": "Nenhuma configuração salva encontrada.",
+        "use_saved_config": "Deseja usar o diretório e API KEY salvos?\nDiretório salvo: {saved_root}\nAPI Key salva: {saved_api_key}\n1 - Sim\n2 - Não, usar novos\nEscolha: ",
+        "no_saved_config": "Nenhuma configuração salva encontrada.",
         "config_saved": "Configuração salva para próxima execução.",
         "summary_title": "=== RESUMO DO PROCESSAMENTO ===",
         "successful_games": "Jogos com arte baixada com sucesso:",
@@ -77,7 +132,9 @@ LANGUAGES = {
         "success_count": "Artes baixadas com sucesso: {}",
         "failed_count": "Artes não encontradas: {}",
         "exclude_prompt": "\nDeseja adicionar os jogos sem arte à lista de exclusão?\n1 - Sim\n2 - Não\nEscolha: ",
-        "excluded_added": "Jogos adicionados à lista de exclusão."
+        "excluded_added": "Jogos adicionados à lista de exclusão.",
+        "downloading_metadata": "Baixando Metadata.xml...",
+        "metadata_download_failed": "Falha ao baixar Metadata.xml. O aplicativo continuará sem ele."
     },
     "en": {
         "choose_lang": "Select language:\n1 - Portuguese\n2 - English\nChoice: ",
@@ -85,10 +142,11 @@ LANGUAGES = {
         "ask_root": "Enter the root directory containing 'OSDXMB' and 'DVD' folders: ",
         "missing_folders": "Error: The 'OSDXMB' and 'DVD' folders must exist inside the provided directory.",
         "ask_api_key": ("Enter your SteamGridDB API Key: ",
-                         "You can get your API Key for free at https://www.steamgriddb.com/profile/preferences under the 'API Key' section."),
+                         "This app uses the SteamGridDB API to fetch artwork if it cannot be obtained through other means. You can get your API Key for free at https://www.steamgriddb.com/profile/preferences under the 'API Key' section."),
+        "api_key_optional": "API Key is OPTIONAL. Press Enter to skip or type your API key and press Enter: ",
         "process_start": "Starting scan...",
         "process_end": "Process finished. Check log.txt for details.",
-        "use_saved_config": "Use saved directory and API KEY?\nSaved directory: {saved_root}\n1 - Yes\n2 - No, use new ones\nChoice: ",
+        "use_saved_config": "Use saved directory and API KEY?\nSaved directory: {saved_root}\nSaved API Key: {saved_api_key}\n1 - Yes\n2 - No, use new ones\nChoice: ",
         "no_saved_config": "No saved configuration found.",
         "config_saved": "Configuration saved for next execution.",
         "summary_title": "=== PROCESSING SUMMARY ===",
@@ -99,7 +157,9 @@ LANGUAGES = {
         "success_count": "Art successfully downloaded: {}",
         "failed_count": "Art not found: {}",
         "exclude_prompt": "\nDo you want to add games without art to the exclusion list?\n1 - Yes\n2 - No\nChoice: ",
-        "excluded_added": "Games added to exclusion list."
+        "excluded_added": "Games added to exclusion list.",
+        "downloading_metadata": "Downloading Metadata.xml...",
+        "metadata_download_failed": "Failed to download Metadata.xml. The app will continue without it."
     }
 }
 
@@ -126,8 +186,128 @@ def log(message):
         f.write(message + "\n")
     print(message)
 
-# Function to fetch SteamGridDB images (without caching)
-def fetch_sgdb_image(game_name, category, api_key):
+# Function to calculate string similarity
+def string_similarity(a, b):
+    return SequenceMatcher(None, a.lower(), b.lower()).ratio()
+
+# Function to parse Metadata.xml and find matching game
+def find_game_in_metadata(game_name):
+    if not os.path.exists("Metadata.xml"):
+        log(f"[INFO] Metadata.xml not found, skipping local lookup for {game_name}")
+        return None
+    
+    try:
+        tree = ET.parse("Metadata.xml")
+        root = tree.getroot()
+        
+        best_match = None
+        highest_similarity = 0
+        
+        for game in root.findall(".//Game"):
+            name_elem = game.find("Name")
+            if name_elem is not None and name_elem.text is not None:
+                similarity = string_similarity(game_name, name_elem.text)
+                if similarity > highest_similarity and similarity > 0.7:  # 70% similarity threshold
+                    highest_similarity = similarity
+                    best_match = game
+        
+        if best_match:
+            database_id_elem = best_match.find("DatabaseID")
+            if database_id_elem is not None and database_id_elem.text is not None:
+                matched_name = best_match.find("Name")
+                matched_name_text = matched_name.text if matched_name is not None and matched_name.text is not None else "Unknown"
+                log(f"Found match in Metadata.xml: {game_name} -> {matched_name_text} (similarity: {highest_similarity:.2f})")
+                return database_id_elem.text
+        
+        log(f"[INFO] No match found in Metadata.xml for {game_name}")
+        return None
+    except Exception as e:
+        log(f"[ERROR] Failed to parse Metadata.xml: {e}")
+        return None
+
+# Function to find images in Metadata.xml by database ID
+def find_images_in_metadata(database_id):
+    if not os.path.exists("Metadata.xml"):
+        return None, None
+    
+    try:
+        tree = ET.parse("Metadata.xml")
+        root = tree.getroot()
+        
+        logo_url = None
+        hero_url = None
+        
+        # Find logo (Clear Logo)
+        for game_image in root.findall(".//GameImage"):
+            db_id_elem = game_image.find("DatabaseID")
+            type_elem = game_image.find("Type")
+            file_elem = game_image.find("FileName")
+            
+            if (db_id_elem is not None and db_id_elem.text is not None and db_id_elem.text == database_id and
+                type_elem is not None and type_elem.text is not None and type_elem.text == "Clear Logo" and
+                file_elem is not None and file_elem.text is not None and not logo_url):
+                logo_url = f"https://images.launchbox-app.com//{file_elem.text}"
+        
+        # Find hero (Fanart - Background)
+        for game_image in root.findall(".//GameImage"):
+            db_id_elem = game_image.find("DatabaseID")
+            type_elem = game_image.find("Type")
+            file_elem = game_image.find("FileName")
+            
+            if (db_id_elem is not None and db_id_elem.text is not None and db_id_elem.text == database_id and
+                type_elem is not None and type_elem.text is not None and type_elem.text == "Fanart - Background" and
+                file_elem is not None and file_elem.text is not None and not hero_url):
+                hero_url = f"https://images.launchbox-app.com//{file_elem.text}"
+        
+        # If no hero found, look for any screenshot
+        if not hero_url:
+            for game_image in root.findall(".//GameImage"):
+                db_id_elem = game_image.find("DatabaseID")
+                type_elem = game_image.find("Type")
+                file_elem = game_image.find("FileName")
+                
+                if (db_id_elem is not None and db_id_elem.text is not None and db_id_elem.text == database_id and
+                    type_elem is not None and type_elem.text is not None and "Screenshot" in type_elem.text and
+                    file_elem is not None and file_elem.text is not None and not hero_url):
+                    hero_url = f"https://images.launchbox-app.com//{file_elem.text}"
+        
+        return logo_url, hero_url
+    except Exception as e:
+        log(f"[ERROR] Failed to search for images in Metadata.xml: {e}")
+        return None, None
+
+# New implementation of fetch_sgdb_image with fallback
+def fetch_sgdb_images(game_name, api_key):
+    # Try to find the game in Metadata.xml first
+    database_id = find_game_in_metadata(game_name)
+    logo_url, hero_url = None, None
+    
+    if database_id:
+        # Try to find both images in Metadata.xml
+        logo_url, hero_url = find_images_in_metadata(database_id)
+        
+        if logo_url:
+            log(f"Found logo for {game_name} in Metadata.xml: {logo_url}")
+        if hero_url:
+            log(f"Found hero for {game_name} in Metadata.xml: {hero_url}")
+    
+    # Fallback to SteamGridDB API if available and needed
+    if api_key and (not logo_url or not hero_url):
+        log(f"Falling back to SteamGridDB API for {game_name}")
+        if not logo_url:
+            logo_url = fetch_sgdb_image_api(game_name, "logos", api_key)
+        if not hero_url:
+            hero_url = fetch_sgdb_image_api(game_name, "heroes", api_key)
+    
+    if not logo_url:
+        log(f"[WARN] No logo found for {game_name}")
+    if not hero_url:
+        log(f"[WARN] No hero found for {game_name}")
+    
+    return logo_url, hero_url
+
+# Original implementation as fallback
+def fetch_sgdb_image_api(game_name, category, api_key):
     url = f"https://www.steamgriddb.com/api/v2/search/autocomplete/{game_name}"
     headers = {"Authorization": f"Bearer {api_key}"}
     r = requests.get(url, headers=headers)
@@ -152,7 +332,7 @@ def fetch_sgdb_image(game_name, category, api_key):
         log(f"[WARN] No {category} images found for {game_name}")
         return None
 
-    log(f"Fetched {category} for {game_name}: {images[0]['url']}")
+    log(f"Fetched {category} for {game_name} from SteamGridDB: {images[0]['url']}")
     return images[0]["url"]
 
 # Extract GameID from ISO
@@ -166,9 +346,10 @@ def extract_gameid_from_iso(iso_path):
         text = buf.read().decode("utf-8", errors="ignore")
         for line in text.splitlines():
             if "BOOT2 = cdrom0:" in line:
-                gameid = line.strip().split("cdrom0:\\")[-1].replace(";1", "").replace('.', '').replace('_', '-')
-                log(f"Extracted GameID {gameid} from {iso_path.name}")
-                return gameid
+                # Extract the original GameID with dots and underscores
+                original_gameid = line.strip().split("cdrom0:\\")[-1].replace(";1", "")
+                log(f"Extracted GameID {original_gameid} from {iso_path.name}")
+                return original_gameid
     except Exception as e:
         log(f"[ERROR] Could not extract GameID from {iso_path.name}: {e}")
     finally:
@@ -178,8 +359,16 @@ def extract_gameid_from_iso(iso_path):
             pass
     return None
 
+# Create a clean GameID for GameIndex.yaml lookup
+def clean_gameid_for_lookup(gameid):
+    # Remove dots and replace underscores with hyphens for GameIndex.yaml lookup
+    return gameid.replace('.', '').replace('_', '-')
+
 # Lookup game name from GameIndex.yaml
 def lookup_game_name(gameid):
+    # Clean the GameID for lookup in GameIndex.yaml
+    clean_gameid = clean_gameid_for_lookup(gameid)
+    
     url = "https://raw.githubusercontent.com/PCSX2/pcsx2/refs/heads/master/bin/resources/GameIndex.yaml"
     try:
         r = requests.get(url)
@@ -192,23 +381,29 @@ def lookup_game_name(gameid):
         
         # The YAML structure is a dictionary where keys are GameIDs
         # and values contain game information including the name
-        if gameid in data:
-            name = data[gameid].get('name')
+        if clean_gameid in data:
+            name = data[clean_gameid].get('name')
             if name:
-                log(f"Found game name for {gameid}: {name}")
+                log(f"Found game name for {clean_gameid}: {name}")
                 return name
         
-        log(f"[WARN] GameID {gameid} not found in GameIndex.yaml")
+        log(f"[WARN] GameID {clean_gameid} not found in GameIndex.yaml")
         return None
 
     except Exception as e:
-        log(f"[ERROR] Exception while looking up game name for {gameid}: {e}")
+        log(f"[ERROR] Exception while looking up game name for {clean_gameid}: {e}")
         return None
 
 # Main flow
 if __name__ == "__main__":
     if os.path.exists(LOG_FILE):
         os.remove(LOG_FILE)
+
+    # Download Metadata.xml if it doesn't exist
+    print(L["downloading_metadata"])
+    if not download_metadata():
+        print(L["metadata_download_failed"])
+    clear_screen()  # Clear screen after metadata download
 
     # Lists to track successful and failed games
     successful_games = []
@@ -220,9 +415,12 @@ if __name__ == "__main__":
     
     use_saved = False
     
-    if saved_root and saved_api_key:
+    # Modified condition to only require root directory (API key is optional)
+    if saved_root and os.path.exists(saved_root):
         try:
-            choice = input(L["use_saved_config"].format(saved_root=saved_root))
+            # Show masked API key for privacy
+            masked_api_key = saved_api_key if saved_api_key and len(saved_api_key) <= 5 else (saved_api_key[:5] + '...' if saved_api_key else 'None')
+            choice = input(L["use_saved_config"].format(saved_root=saved_root, saved_api_key=masked_api_key))
             clear_screen()
             if choice == "1":
                 use_saved = True
@@ -232,15 +430,18 @@ if __name__ == "__main__":
             use_saved = False
     
     if not use_saved:
-        if not saved_root and not saved_api_key:
+        if not saved_root:
             print(L["no_saved_config"])
         
         root = input(L["ask_root"])
         clear_screen()
+        
+        # API key is now optional
         api_key = os.getenv("STEAMGRIDDB_API_KEY")
         if not api_key:
             print(L["ask_api_key"][1])
-            api_key = input(L["ask_api_key"][0])
+            api_key_input = input(L["api_key_optional"])
+            api_key = api_key_input if api_key_input.strip() else None
             clear_screen()
         
         # Save the new configuration
@@ -284,8 +485,8 @@ if __name__ == "__main__":
                 log(f"Unknown status for {filename} in cache, reprocessing")
         
         log(f"Processing ISO: {filename}")
-        gameid = extract_gameid_from_iso(iso_file)
-        if not gameid:
+        original_gameid = extract_gameid_from_iso(iso_file)
+        if not original_gameid:
             log(f"Failed to extract GameID from {filename}")
             # Update cache with BAD status
             cache["scanned_files"][filename] = {
@@ -297,43 +498,45 @@ if __name__ == "__main__":
             failed_games.append(f"{filename} (Failed to extract GameID)")
             continue
         
-        name = lookup_game_name(gameid)
+        name = lookup_game_name(original_gameid)
         if not name:
-            log(f"GameID {gameid} not found in GameIndex for {filename}")
+            log(f"GameID {original_gameid} not found in GameIndex for {filename}")
             # Update cache with BAD status
             cache["scanned_files"][filename] = {
                 "status": "BAD",
-                "gameid": gameid,
+                "gameid": original_gameid,
                 "reason": "GameID not found in GameIndex"
             }
             save_cache(cache)
-            failed_games.append(f"{filename} (GameID: {gameid} - Not found in GameIndex)")
+            failed_games.append(f"{filename} (GameID: {original_gameid} - Not found in GameIndex)")
             continue
 
-        art_path = root_path / "OSDXMB" / "ART" / gameid
+        # Use the original GameID (with dots and underscores) for the folder name
+        art_path = root_path / "OSDXMB" / "ART" / original_gameid
         art_path.mkdir(parents=True, exist_ok=True)
+
+        # Get both logo and hero URLs at once
+        logo_url, hero_url = fetch_sgdb_images(name, api_key)
 
         logo_success = False
         hero_success = False
 
-        logo_url = fetch_sgdb_image(name, "logos", api_key)
         if logo_url:
             try:
                 r = requests.get(logo_url)
                 with open(art_path / "ICON0.png", "wb") as f:
                     f.write(r.content)
-                log(f"Saved ICON0.png for {name} [{gameid}]")
+                log(f"Saved ICON0.png for {name} [{original_gameid}]")
                 logo_success = True
             except Exception as e:
                 log(f"[ERROR] Failed to save ICON0.png for {name}: {e}")
 
-        hero_url = fetch_sgdb_image(name, "heroes", api_key)
         if hero_url:
             try:
                 r = requests.get(hero_url)
                 with open(art_path / "PIC1.png", "wb") as f:
                     f.write(r.content)
-                log(f"Saved PIC1.png for {name} [{gameid}]")
+                log(f"Saved PIC1.png for {name} [{original_gameid}]")
                 hero_success = True
             except Exception as e:
                 log(f"[ERROR] Failed to save PIC1.png for {name}: {e}")
@@ -342,21 +545,21 @@ if __name__ == "__main__":
             # Update cache with OK status
             cache["scanned_files"][filename] = {
                 "status": "OK",
-                "gameid": gameid,
+                "gameid": original_gameid,
                 "game_name": name
             }
             save_cache(cache)
-            successful_games.append(f"{name} (GameID: {gameid})")
+            successful_games.append(f"{name} (GameID: {original_gameid})")
         else:
             # Update cache with BAD status
             cache["scanned_files"][filename] = {
                 "status": "BAD",
-                "gameid": gameid,
+                "gameid": original_gameid,
                 "game_name": name,
                 "reason": "No art found"
             }
             save_cache(cache)
-            failed_games.append(f"{name} (GameID: {gameid} - No art found)")
+            failed_games.append(f"{name} (GameID: {original_gameid} - No art found)")
 
     log("=== PS2 ISO Scan Finished ===")
     print(L["process_end"])
