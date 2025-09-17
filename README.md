@@ -1,4 +1,7 @@
 # PS2 OSD-XMB Art Fetcher
+<p align="center"><img width="802" height="632" alt="Captura de tela 2025-09-17 165813" src="https://github.com/user-attachments/assets/b8be29f0-ed7c-404f-ab62-76c8f57a9b00" /></p>
+
+
 A powerful CLI tool that automatically fetches high-quality artwork (logos and backgrounds) for your PS2 ISO games to use with the OSD-XMB PlayStation 2 homebrew.
 
 # ✨ Features
@@ -42,10 +45,13 @@ For Most Users (Recommended) - Using Pre-built Binaries:
 # 🛠️ Building Binaries
 
 # Install PyInstaller and dependencies
-    pip install pyinstaller requests pycdlib pyyaml lxml
+    pip install pyinstaller customtkinter Pillow requests PyYAML pycdlib
 
-# Building executable
-    pyinstaller --onefile --console PS2_OSD-XMB_Art_Fetcher.py
+# Building executable on Windows
+    pyinstaller --onefile --windowed --add-data "logo.png;." --name "PS2_OSD-XMB_Art_Fetcher" PS2_OSD-XMB_Art_Fetcher_GUI.py
+
+# Building executable on macOS or Linux
+    pyinstaller --onefile --windowed --add-data "logo.png:." --name "PS2_OSD-XMB_Art_Fetcher" PS2_OSD-XMB_Art_Fetcher_GUI.py
 
 # 🤝 Contributing
 
