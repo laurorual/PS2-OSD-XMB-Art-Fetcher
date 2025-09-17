@@ -2,7 +2,7 @@
 <p align="center"><img width="802" height="632" alt="Captura de tela 2025-09-17 165813" src="https://github.com/user-attachments/assets/b8be29f0-ed7c-404f-ab62-76c8f57a9b00" /></p>
 
 
-A powerful CLI tool that automatically fetches high-quality artwork (logos and backgrounds) for your PS2 ISO games to use with the OSD-XMB PlayStation 2 homebrew.
+A powerful tool that automatically fetches high-quality artwork (logos and backgrounds) for your PS2 ISO games to use with the OSD-XMB PlayStation 2 homebrew.
 
 # ✨ Features
 Automated Artwork Fetching: Downloads ICON0.png (logos) and PIC1.png (hero backgrounds) for all your PS2 ISO games
